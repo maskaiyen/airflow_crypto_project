@@ -91,7 +91,6 @@ class CoinGeckoClient:
              
             json_data = response.json()
             market_data = [CryptoDataSchema(**item) for item in json_data]
-            market_data = []
 
             logger.info(f"Successfully fetched {len(market_data)} cryptocurrency records")
             return market_data

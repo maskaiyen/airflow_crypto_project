@@ -53,35 +53,51 @@ For containerized runs, the DAG assumes data under `/opt/airflow/data`; adjust `
 
 1. **Clone and enter the project**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/maskaiyen/airflow_crypto_project.git
    cd airflow_crypto_project
    ```
 
-<!-- 2. **Run Airflow with Docker Compose**
+2. **Create .env from template**
    ```bash
-   docker compose up -d
-   ``` -->
+   cp .env.example .env
+   ```
 
-2. **Initialize Airflow**
+3. **Generate secure keys**
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   # Copy output to AIRFLOW__CORE__FERNET_KEY in .env 
+
+   openssl rand -hex 32
+   # Copy output to AIRFLOW__WEBSERVER__SECRET_KEY in .env
+   ```
+
+4. **Set your user ID**
+   ```bash
+   # Linux/macOS: run `id -u` and update AIRFLOW_UID in .env
+   # Windows: use 50000
+   ```
+
+5. **Edit .env and fill in the values**
+   ```bash
+   nano .env
+   ```
+
+6. **Initialize and start**
    ```bash
    docker compose up airflow-init
-   ```
-
-3. **Run Airflow with Docker Compose**
-   ```bash
    docker compose up -d
    ```
 
-4. **Access Airflow UI**
+7. **Access Airflow UI**
    - URL: http://localhost:8080
    - Username: `airflow`
    - Password: `airflow`
 
-5. **Trigger the DAG**
+8. **Trigger the DAG**
    - Navigate to `crypto_market_data_pipeline`
-   - Click play button to run manually
+   - Click Trigger button to run manually
 
-6. **Run Tests (local)**
+9. **Run Tests (local)**
    ```bash
    pytest tests/ -v
    ```
