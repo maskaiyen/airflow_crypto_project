@@ -1,0 +1,45 @@
+# Environment files
+.env
+.env.backup
+.env.local
+
+# Airflow runtime (keep structure, ignore content)
+logs/*
+!logs/.gitkeep
+
+data/*
+!data/.gitkeep
+
+# Airflow database
+airflow.db
+airflow.cfg
+webserver_config.py
+standalone_admin_password.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+
+# Others
+*.log
+*.tmp
