@@ -197,7 +197,3 @@ pytest tests/ -v
 | **Python** | Type hints, enums, TypedDicts, pandas, structured logging |
 | **Testing** | Unit tests with pytest and mocks for API client and validators |
 | **DevOps / runtime** | Docker Compose for Airflow, config and data directory layout |
-
-## License
-
-MIT License.
