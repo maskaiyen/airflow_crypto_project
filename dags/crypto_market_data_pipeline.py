@@ -266,7 +266,7 @@ def notify_schema_failure(**context) -> None:
 with DAG(
     dag_id="crypto_market_data_pipeline",
     default_args=default_args,
-    schedule=None,
+    schedule="0 8 * * *",
     start_date=datetime(2026, 1, 21),
     catchup=False,
     tags=["crypto", "validation"],
@@ -303,8 +303,8 @@ with DAG(
         python_callable=handle_schema_failure,
     )
 
-    generate_error_report_task = PythonOperator(
-        task_id="generate_error_report",
+    generate_schema_error_report_task = PythonOperator(
+        task_id="generate_schema_error_report",
         python_callable=generate_schema_error_report,
         retries=2,
         retry_delay=timedelta(seconds=30),
@@ -332,5 +332,5 @@ with DAG(
     fetch_task >> check_schema_task
     check_schema_task >> [run_full_validation_task, handle_schema_failure_task]
     run_full_validation_task >> generate_quality_report_task >> notify_validation_complete_task >> end_task
-    handle_schema_failure_task >> generate_error_report_task >> notify_schema_failure_task >> end_task
+    handle_schema_failure_task >> generate_schema_error_report_task >> notify_schema_failure_task >> end_task
 
