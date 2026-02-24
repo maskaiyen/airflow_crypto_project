@@ -1,199 +1,171 @@
 # Crypto Market Data Validation Pipeline
 
-An Apache Airflow pipeline that fetches cryptocurrency market data from the CoinGecko API, validates schema and data quality, and produces flagged datasets and validation reports.
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
+![Apache Airflow](https://img.shields.io/badge/Apache%20Airflow-3.x-017CEE?logo=apacheairflow)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)
+![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic)
+![pytest](https://img.shields.io/badge/Tested-pytest-0A9EDC?logo=pytest)
 
-## Overview
+An end-to-end data pipeline built with Apache Airflow that fetches cryptocurrency market data from the CoinGecko API, validates data quality, and produces flagged datasets and structured reports — without modifying source data.
 
-- **Fetch**: Pull market data from [CoinGecko](https://www.coingecko.com/) `/coins/markets` endpoint.
-- **Schema validation**: Ensure required columns and structure before running full validation.
-- **Data validation**: Flags data quality issues (invalid numeric types, abnormal prices, invalid market cap, missing values, duplicates) without modifying source data—adds flag columns to preserve data integrity.
-- **Reports**: JSON quality reports and schema error reports; CSV outputs for raw and flagged data.
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Orchestration | Apache Airflow 3.x (`BranchPythonOperator`, XCom, retries) |
+| Data Validation | Pandas, Pydantic v2 |
+| API Integration | CoinGecko REST API, Requests |
+| Containerization | Docker Compose |
+| Testing | pytest, unittest.mock |
+| Language | Python 3.10+ |
+
+---
+
+## Pipeline Architecture
+
+### DAG Flow
+
+![DAG Graph View](images/dag-graph-view.png)
+#### *Airflow Graph View showing the pipeline with branching logic*
+#### *`fetch → schema check (VALID) → full validation → quality report → notify → end`*
+#### *`fetch → schema check (INVALID) → error_log → schema_error_report → notify → end`*
+
+---
+
+### DAG Task Reference
+
+| Step | Task ID | Description |
+|------|---------|-------------|
+| 1 | `fetch_coingecko_data` | Fetch 250 records from CoinGecko, save raw CSV, push path via XCom. Retries 3× with exponential backoff. |
+| 2 | `check_schema` | Validate required fields and structure. **Branch**: VALID → full validation, INVALID → failure path. |
+| 3a | `run_full_validation` | Run all `flag_*` validations, write flagged CSV. |
+| 3b | `handle_schema_failure` | Log schema error status and message. |
+| 4a | `generate_quality_report` | Write `quality_report_{date}.json` to `data/reports/`. |
+| 4b | `generate_schema_error_report` | Write `schema_error_report_{date}.json` to `data/reports/`. |
+| 5 | `notify_*` | Log summary. ⚠️ Slack/Email integration stub — ready to extend. |
+| 6 | `end` | Join both branches (`none_failed_min_one_success`). |
+
+---
 
 ## Project Structure
 
 ```
 airflow_crypto_project/
 ├── dags/
-│   └── crypto_market_data_pipeline.py   # Airflow DAG: fetch → schema check → full validation or schema failure
+│   └── crypto_market_data_pipeline.py   # Airflow DAG definition
 ├── src/
-│   ├── __init__.py
-│   ├── schemas.py                  # Pydantic model for CoinGecko API response (CryptoDataSchema)
-│   ├── constants.py                # Schema/validation status enums and flag column names
-│   ├── api_client.py               # CoinGecko API client (CoinGeckoClient, CoinGeckoAPIError)
-│   ├── validators.py               # CryptoDataValidator: schema + flag validations + reports
-│   └── report_types.py             # TypedDicts for validation and schema error reports
+│   ├── api_client.py                    # CoinGecko HTTP client + error handling
+│   ├── validators.py                    # Schema + flag validations + report generation
+│   ├── schemas.py                       # Pydantic model for API response
+│   ├── constants.py                     # Enums: SchemaValidationStatus, ValidationFields
+│   └── report_types.py                  # TypedDicts for structured reports
 ├── tests/
-│   ├── __init__.py
-│   ├── test_api_client.py          # Unit tests for CoinGeckoClient
-│   └── test_validators.py          # Unit tests for CryptoDataValidator
+│   ├── test_api_client.py
+│   └── test_validators.py
 ├── data/
-│   ├── raw/                        # Raw CSV from CoinGecko (e.g. crypto_raw_YYYYMMDD.csv)
-│   ├── flagged/                    # Flagged CSV with validation columns (e.g. flagged_YYYYMMDD.csv)
-│   └── reports/                    # Quality reports and schema error reports (JSON)
-├── config/                         # Airflow and environment config (e.g. airflow.cfg, postgres, sql)
-├── logs/                           # Airflow task logs
-├── plugins/                        # Custom Airflow plugins (optional)
-├── images/
+│   ├── raw/          # crypto_raw_YYYYMMDD.csv
+│   ├── flagged/      # flagged_YYYYMMDD.csv  (original columns + 6 flag columns)
+│   └── reports/      # quality_report_YYYYMMDD.json / schema_error_report_YYYYMMDD.json
 ├── docker-compose.yaml
 ├── requirements.txt
-├── .env.example
-├── .gitignore
-└── README.md  
+└── .env.example
 ```
 
-## Prerequisites
+---
 
-- Docker and Docker Compose
-- Python 3.10+ (for local tests)
-- Dependencies: `pandas`, `pydantic`, `requests`, `typing_extensions`
+## Quick Start
 
-For containerized runs, the DAG assumes data under `/opt/airflow/data`; adjust `DATA_BASE_PATH` in the DAG if needed.
+**1. Clone and configure**
+```bash
+git clone https://github.com/maskaiyen/airflow_crypto_project.git
+cd airflow_crypto_project
+cp .env.example .env
+```
 
-## Setup and Running
+Fill in `.env` — generate required keys:
+```bash
+# AIRFLOW__CORE__FERNET_KEY
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
-1. **Clone and enter the project**
-   ```bash
-   git clone https://github.com/maskaiyen/airflow_crypto_project.git
-   cd airflow_crypto_project
-   ```
+# AIRFLOW__WEBSERVER__SECRET_KEY
+openssl rand -hex 32
+```
 
-2. **Create .env from template**
-   ```bash
-   cp .env.example .env
-   ```
+**2. Start Airflow**
+```bash
+docker compose up airflow-init
+docker compose up -d
+```
 
-3. **Generate secure keys**
-   ```bash
-   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-   # Copy output to AIRFLOW__CORE__FERNET_KEY in .env 
+**3. Trigger the DAG**
 
-   openssl rand -hex 32
-   # Copy output to AIRFLOW__WEBSERVER__SECRET_KEY in .env
-   ```
+Open http://localhost:8080 (user/pass: `airflow` / `airflow`), navigate to `crypto_market_data_pipeline`, and click **Trigger DAG**.
 
-4. **Set your user ID**
-   ```bash
-   # Linux/macOS: run `id -u` and update AIRFLOW_UID in .env
-   # Windows: use 50000
-   ```
-
-5. **Edit .env and fill in the values**
-   ```bash
-   nano .env
-   ```
-
-6. **Initialize and start**
-   ```bash
-   docker compose up airflow-init
-   docker compose up -d
-   ```
-
-7. **Access Airflow UI**
-   - URL: http://localhost:8080
-   - Username: `airflow`
-   - Password: `airflow`
-
-8. **Trigger the DAG**
-   - Navigate to `crypto_market_data_pipeline`
-   - Click Trigger button to run manually
-
-9. **Run Tests (local)**
-   ```bash
-   pytest tests/ -v
-   ```
-
-## Pipeline Architecture
-
-### DAG Structure
-
-![DAG Graph View](images/dag-graph-view.png)  
-*Airflow Graph View showing the pipeline with branching logic*
-
-## DAG: `crypto_market_data_pipeline`
-
-| Step | Task | Description |
-|------|------|-------------|
-| 1 | `fetch_coingecko_data` | Call CoinGecko API, save CSV to `data/raw/crypto_raw_{ds_nodash}.csv`, push paths via XCom |
-| 2 | `check_schema` | Validate DataFrame schema (required fields, non-empty). **Branch**: valid → `run_full_validation`, invalid → `handle_schema_failure` |
-| 3a | `run_full_validation` | Run all flag validations, write flagged CSV to `data/flagged/` |
-| 3b | `handle_schema_failure` | Write schema error report to `data/reports/schema_error_report_{ds_nodash}.json` |
-| 4 | `generate_quality_report` / `generate_schema_error_report` | Write quality report and schema error report to `data/reports/` |
-| 5 | `notify_validation_complete` / `notify_schema_failure` | Log summary (stubs for Slack/email) |
-| 6 | `end` | Join branch and finish |
-
-## Source Modules
-
-### `src/schemas.py`
-
-- **`CryptoDataSchema`**: Pydantic model for CoinGecko `/coins/markets` response (id, symbol, name, prices, market_cap, volume, supply, etc.). Used to parse and validate API responses.
-
-### `src/constants.py`
-
-- **`SchemaValidationStatus`**: `VALID`, `EMPTY_DATA`, `INVALID_TYPE`, `MISSING_REQUIRED_FIELDS`
-- **`ValidationStatus`**: `PASSED`, `FAILED`, `SKIPPED`
-- **`ValidationFields`**: Column names for flags (`has_non_numeric_value`, `has_abnormal_price`, `has_invalid_market_cap`, `has_missing_values`, `has_duplicate`, `validated_at`)
-
-### `src/api_client.py`
-
-- **`CoinGeckoClient`**: HTTP client for CoinGecko API; `get_markets_data()` returns a list of `CryptoDataSchema`. Handles timeouts, non-200 responses, and 429 rate limits.
-- **`CoinGeckoAPIError`**: Raised on API or network errors.
-
-### `src/validators.py`
-
-- **`CryptoDataValidator`**:
-  - **Schema**: `validate_schema(df)` → `SchemaValidationStatus`
-  - **Flags**: `flag_invalid_numeric_types`, `flag_abnormal_prices`, `flag_invalid_market_cap`, `flag_missing_values`, `flag_duplicates`, `add_metadata`
-  - **Reports**: `generate_validation_report(df)`, `generate_schema_error_report(status)`
-
-### `src/report_types.py`
-
-- TypedDicts for structured reports: `ValidationItemReport`, `ValidationSummary`, `ValidationReport`, `SchemaErrorSummary`, `SchemaErrorReport`.
-
-## Data Directories
-
-| Directory | Purpose |
-|-----------|--------|
-| **data/raw/** | Raw market data CSVs from CoinGecko (one file per run, dated). |
-| **data/flagged/** | Same data with validation flag columns and metadata; written only when schema is valid and full validation runs. |
-| **data/reports/** | `quality_report_{date}.json` (full validation) and `schema_error_report_{date}.json` (schema failure). |
-
-## Config, Logs, Plugins
-
-- **config/** – Airflow and DB/config files (e.g. `airflow.cfg`, `postgres.py`, `sql.py`). Use for environment-specific settings.
-- **logs/** – Airflow scheduler and task logs (created at runtime).
-- **plugins/** – Optional custom operators, hooks, or plugins; empty by default.
-
-## Tests
-
-- **tests/test_api_client.py**: Parameter validation, successful response parsing, 429/4xx/5xx handling, timeouts, and request errors for `CoinGeckoClient`.
-- **tests/test_validators.py**: Schema validation (valid/empty/missing fields), all flag methods, report generation, and edge cases for `CryptoDataValidator`.
-
-Run the full test suite:
-
+**4. Run tests (local)**
 ```bash
 pytest tests/ -v
 ```
 
-## Monitoring
+> For full environment variable reference, see [`.env.example`](.env.example).
 
-#### Successful pipeline execution
+---
 
-![Successful DAG Run](images/successful-run.png)  
-*All tasks completed successfully with full validation and quality report*
+## Execution Results
 
-#### Failure handling (schema branch)
+### Successful Run
 
-![Schema Failure Handling](images/schema-failure-handling.png)  
-*Schema validation failure triggering the schema failure branch*
+![Successful DAG Run](images/successful-run.png)
+*250 records fetched, validated, and flagged. Quality report persisted to `data/reports/`.*
 
-## Skills & Technologies Demonstrated
+### Schema Failure Handling
 
-| Area | What this project shows |
-|------|-------------------------|
-| **Apache Airflow** | DAG definition, `PythonOperator`, `BranchPythonOperator`, XCom, trigger rules, retries and backoff |
-| **Data pipelines** | Fetch → validate (schema) → branch → full validation or failure handling → reports and notifications |
-| **Data quality** | Schema checks, numeric/range validation, business rules (e.g. market_cap ≈ price × supply), missing values and duplicates |
-| **API integration** | HTTP client, Pydantic response models, error handling (timeouts, 429, 4xx/5xx) |
-| **Python** | Type hints, enums, TypedDicts, pandas, structured logging |
-| **Testing** | Unit tests with pytest and mocks for API client and validators |
-| **DevOps / runtime** | Docker Compose for Airflow, config and data directory layout |
+![Schema Failure Handling](images/schema-failure-handling.png)
+*`BranchPythonOperator` correctly routes to the failure path when schema validation fails:*
+*`fetch → schema check (INVALID) → handle_schema_failure → schema error report → notify → end`*
+
+---
+
+## Output Sample
+
+Flagged CSV appends 6 columns to the original data — **source data is never modified**:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `has_non_numeric_value` | bool | Non-numeric value found in numeric fields |
+| `has_abnormal_price` | bool | `current_price` outside $0.000001–$1,000,000 |
+| `has_invalid_market_cap` | bool | `market_cap` deviates >5% from `price × supply`, or ≤ 0 |
+| `has_missing_values` | bool | Null in any required field |
+| `has_duplicate` | bool | Duplicate `id` (first occurrence kept) |
+| `validated_at` | str | ISO timestamp (Asia/Taipei) |
+
+Quality report structure (`data/reports/quality_report_YYYYMMDD.json`):
+
+```json
+{
+  "status": "failed",
+  "stage": "data_validation",
+  "total_rows": 250,
+  "validations": {
+    "price_range": {
+      "status": "failed",
+      "total_rows": 250,
+      "failed_count": 3,
+      "failed_percentage": 1.2,
+      "examples": [{"symbol": "btt", "name": "BitTorrent", "current_price": 3.39633e-07}]
+    },
+    "numeric_types": {"status": "passed", "total_rows": 250, "failed_count": 0},
+    "market_cap": {"status": "passed", "total_rows": 250, "failed_count": 0},
+    "missing_values":{"status": "passed", "total_rows": 250, "failed_count": 0},
+    "duplicates": {"status": "passed", "total_rows": 250, "failed_count": 0},
+  },
+  "summary": {
+    "total": 5,
+    "executed": 5,
+    "passed": ["numeric_types", "market_cap", "missing_values", "duplicates"],
+    "failed": ["price_range"],
+    "skipped": []
+  }
+}
+```
